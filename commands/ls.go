@@ -1,8 +1,11 @@
 package commands
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	text "github.com/MichaelMure/go-term-text"
 	"github.com/spf13/cobra"
@@ -21,9 +24,26 @@ var (
 	lsNoQuery       []string
 	lsSortBy        string
 	lsSortDirection string
+	lsOutputFormat  string
 )
 
-func runLsBug(cmd *cobra.Command, args []string) error {
+type JSONBug struct {
+	Id           string
+	CreationTime time.Time
+	LastEdited   time.Time
+
+	Status       string
+	Labels       []bug.Label
+	Title        string
+	Actors       []string
+	Participants []string
+	Author       string
+
+	Comments int
+	Metadata map[string]string
+}
+
+func runLsBug(_ *cobra.Command, args []string) error {
 	backend, err := cache.NewRepoCache(repo)
 	if err != nil {
 		return err
@@ -48,51 +68,137 @@ func runLsBug(cmd *cobra.Command, args []string) error {
 
 	allIds := backend.QueryBugs(q)
 
-	for _, id := range allIds {
-		b, err := backend.ResolveBugExcerpt(id)
-		if err != nil {
-			return err
-		}
-
-		var name string
-		if b.AuthorId != "" {
-			author, err := backend.ResolveIdentityExcerpt(b.AuthorId)
+	switch lsOutputFormat {
+	case "plaintext", "plain":
+		for _, id := range allIds {
+			b, err := backend.ResolveBugExcerpt(id)
 			if err != nil {
-				name = "<missing author data>"
-			} else {
-				name = author.DisplayName()
+				return err
 			}
-		} else {
-			name = b.LegacyAuthor.DisplayName()
+
+			fmt.Printf("[%s] %s\n", b.Status, b.Title)
 		}
+		break
 
-		var labelsTxt strings.Builder
-		for _, l := range b.Labels {
-			lc256 := l.Color().Term256()
-			labelsTxt.WriteString(lc256.Escape())
-			labelsTxt.WriteString(" ◼")
-			labelsTxt.WriteString(lc256.Unescape())
+	case "json":
+		for _, id := range allIds {
+			b, err := backend.ResolveBugExcerpt(id)
+			if err != nil {
+				return err
+			}
+
+			jsonBug := JSONBug{
+				b.Id.String(),
+				time.Unix(b.CreateUnixTime, 0),
+				time.Unix(b.EditUnixTime, 0),
+				b.Status.String(),
+				b.Labels,
+				b.Title,
+				[]string{},
+				[]string{},
+				"",
+				b.LenComments,
+				b.CreateMetadata,
+			}
+
+			if b.AuthorId != "" {
+				author, err := backend.ResolveIdentityExcerpt(b.AuthorId)
+				if err != nil {
+					jsonBug.Author = "<missing author data>"
+				} else {
+					jsonBug.Author = author.DisplayName()
+				}
+			} else {
+				jsonBug.Author = b.LegacyAuthor.DisplayName()
+			}
+
+			var checkErr error = nil
+			for _, element := range b.Actors {
+				if element != "" {
+					actor, err := backend.ResolveIdentityExcerpt(element)
+					if err != nil {
+						checkErr = err
+					} else {
+						jsonBug.Actors = append(jsonBug.Actors, actor.DisplayName())
+					}
+				} else {
+					checkErr = errors.New("Empty actor name")
+				}
+			}
+
+			if checkErr != nil {
+				jsonBug.Actors = append(jsonBug.Actors, "<Note: Some actors could not be found.>")
+				checkErr = nil
+			}
+
+			for _, element := range b.Participants {
+				if element != "" {
+					participant, err := backend.ResolveIdentityExcerpt(element)
+					if err != nil {
+						checkErr = err
+					} else {
+						jsonBug.Participants = append(jsonBug.Participants, participant.DisplayName())
+					}
+				} else {
+					checkErr = errors.New("Empty participant name")
+				}
+			}
+
+			if checkErr != nil {
+				jsonBug.Participants = append(jsonBug.Participants, "<Note: Some participants could not be found.>")
+			}
+
+			jsonObject, _ := json.MarshalIndent(jsonBug, "", "    ")
+			fmt.Printf("%s\n", jsonObject)
 		}
+		break
 
-		// truncate + pad if needed
-		labelsFmt := text.TruncateMax(labelsTxt.String(), 10)
-		titleFmt := text.LeftPadMaxLine(b.Title, 50-text.Len(labelsFmt), 0)
-		authorFmt := text.LeftPadMaxLine(name, 15, 0)
+	default:
+		for _, id := range allIds {
+			b, err := backend.ResolveBugExcerpt(id)
+			if err != nil {
+				return err
+			}
 
-		comments := fmt.Sprintf("%4d 💬", b.LenComments)
-		if b.LenComments > 9999 {
-			comments = "    ∞ 💬"
+			var name string
+			if b.AuthorId != "" {
+				author, err := backend.ResolveIdentityExcerpt(b.AuthorId)
+				if err != nil {
+					name = "<missing author data>"
+				} else {
+					name = author.DisplayName()
+				}
+			} else {
+				name = b.LegacyAuthor.DisplayName()
+			}
+
+			var labelsTxt strings.Builder
+			for _, l := range b.Labels {
+				lc256 := l.Color().Term256()
+				labelsTxt.WriteString(lc256.Escape())
+				labelsTxt.WriteString(" ◼")
+				labelsTxt.WriteString(lc256.Unescape())
+			}
+
+			// truncate + pad if needed
+			labelsFmt := text.TruncateMax(labelsTxt.String(), 10)
+			titleFmt := text.LeftPadMaxLine(b.Title, 50-text.Len(labelsFmt), 0)
+			authorFmt := text.LeftPadMaxLine(name, 15, 0)
+
+			comments := fmt.Sprintf("%4d 💬", b.LenComments)
+			if b.LenComments > 9999 {
+				comments = "    ∞ 💬"
+			}
+
+			fmt.Printf("%s %s\t%s\t%s\t%s\n",
+				colors.Cyan(b.Id.Human()),
+				colors.Yellow(b.Status),
+				titleFmt+labelsFmt,
+				colors.Magenta(authorFmt),
+				comments,
+			)
 		}
-
-		fmt.Printf("%s %s\t%s\t%s\t%s\n",
-			colors.Cyan(b.Id.Human()),
-			colors.Yellow(b.Status),
-			titleFmt+labelsFmt,
-			colors.Magenta(authorFmt),
-			comments,
-		)
 	}
-
 	return nil
 }
 
@@ -177,4 +283,6 @@ func init() {
 		"Sort the results by a characteristic. Valid values are [id,creation,edit]")
 	lsCmd.Flags().StringVarP(&lsSortDirection, "direction", "d", "asc",
 		"Select the sorting direction. Valid values are [asc,desc]")
+	lsCmd.Flags().StringVarP(&lsOutputFormat, "format", "f", "default",
+		"Select the output formatting style. Valid values are [default, plain(text), json]")
 }
