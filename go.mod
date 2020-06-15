@@ -12,7 +12,7 @@ require (
 	github.com/corpix/uarand v0.1.1 // indirect
 	github.com/dustin/go-humanize v1.0.0
 	github.com/fatih/color v1.9.0
-	github.com/go-errors/errors v1.0.2
+	github.com/go-errors/errors v1.1.1
 	github.com/gorilla/mux v1.7.4
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/icrowley/fake v0.0.0-20180203215853-4178557ae428
@@ -23,8 +23,8 @@ require (
 	github.com/shurcooL/githubv4 v0.0.0-20190601194912-068505affed7
 	github.com/shurcooL/graphql v0.0.0-20181231061246-d48a9a75455f // indirect
 	github.com/skratchdot/open-golang v0.0.0-20190402232053-79abb63cd66e
-	github.com/spf13/cobra v0.0.7
-	github.com/stretchr/testify v1.5.1
+	github.com/spf13/cobra v1.0.0
+	github.com/stretchr/testify v1.6.1
 	github.com/vektah/gqlparser v1.3.1
 	github.com/xanzy/go-gitlab v0.29.0
 	golang.org/x/crypto v0.0.0-20191011191535-87dc89f01550
