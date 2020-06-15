@@ -35,9 +35,9 @@ type JSONBug struct {
 	Status       string
 	Labels       []bug.Label
 	Title        string
-	Actors       []string
-	Participants []string
-	Author       string
+	Actors       []map[string]string
+	Participants []map[string]string
+	Author       map[string]string
 
 	Comments int
 	Metadata map[string]string
@@ -94,9 +94,9 @@ func runLsBug(_ *cobra.Command, args []string) error {
 				b.Status.String(),
 				b.Labels,
 				b.Title,
-				[]string{},
-				[]string{},
-				"",
+				[]map[string]string{},
+				[]map[string]string{},
+				map[string]string{},
 				b.LenComments,
 				b.CreateMetadata,
 			}
@@ -104,12 +104,14 @@ func runLsBug(_ *cobra.Command, args []string) error {
 			if b.AuthorId != "" {
 				author, err := backend.ResolveIdentityExcerpt(b.AuthorId)
 				if err != nil {
-					jsonBug.Author = "<missing author data>"
+					jsonBug.Author["Name"] = "<Author information could not be loaded>"
 				} else {
-					jsonBug.Author = author.DisplayName()
+					jsonBug.Author["Name"] = author.DisplayName()
+					jsonBug.Author["Login"] = author.Login
 				}
 			} else {
-				jsonBug.Author = b.LegacyAuthor.DisplayName()
+				jsonBug.Author["Name"] = b.LegacyAuthor.DisplayName()
+				jsonBug.Author["Login"] = b.LegacyAuthor.Login
 			}
 
 			var checkErr error = nil
@@ -119,7 +121,10 @@ func runLsBug(_ *cobra.Command, args []string) error {
 					if err != nil {
 						checkErr = err
 					} else {
-						jsonBug.Actors = append(jsonBug.Actors, actor.DisplayName())
+						jsonBug.Actors = append(jsonBug.Actors, map[string]string{
+							"Name":  actor.DisplayName(),
+							"Login": actor.Login,
+						})
 					}
 				} else {
 					checkErr = errors.New("Empty actor name")
@@ -127,7 +132,7 @@ func runLsBug(_ *cobra.Command, args []string) error {
 			}
 
 			if checkErr != nil {
-				jsonBug.Actors = append(jsonBug.Actors, "<Note: Some actors could not be found.>")
+				jsonBug.Actors = append(jsonBug.Actors, map[string]string{"Error": "<Note: Some actors could not be found.>"})
 				checkErr = nil
 			}
 
@@ -137,7 +142,10 @@ func runLsBug(_ *cobra.Command, args []string) error {
 					if err != nil {
 						checkErr = err
 					} else {
-						jsonBug.Participants = append(jsonBug.Participants, participant.DisplayName())
+						jsonBug.Participants = append(jsonBug.Participants, map[string]string{
+							"Name":  participant.DisplayName(),
+							"Login": participant.Login,
+						})
 					}
 				} else {
 					checkErr = errors.New("Empty participant name")
@@ -145,7 +153,7 @@ func runLsBug(_ *cobra.Command, args []string) error {
 			}
 
 			if checkErr != nil {
-				jsonBug.Participants = append(jsonBug.Participants, "<Note: Some participants could not be found.>")
+				jsonBug.Participants = append(jsonBug.Participants, map[string]string{"Error": "<Note: Some participants could not be found.>"})
 			}
 
 			jsonObject, _ := json.MarshalIndent(jsonBug, "", "    ")
