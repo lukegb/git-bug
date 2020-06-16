@@ -29,18 +29,26 @@ var (
 
 type JSONBug struct {
 	Id           string
+	HumanId      string
 	CreationTime time.Time
 	LastEdited   time.Time
 
 	Status       string
 	Labels       []bug.Label
 	Title        string
-	Actors       []map[string]string
-	Participants []map[string]string
-	Author       map[string]string
+	Actors       []JSONIdentity
+	Participants []JSONIdentity
+	Author       JSONIdentity
 
 	Comments int
 	Metadata map[string]string
+}
+
+type JSONIdentity struct {
+	Id      string
+	HumanId string
+	Name    string
+	Login   string
 }
 
 func runLsBug(_ *cobra.Command, args []string) error {
@@ -89,14 +97,15 @@ func runLsBug(_ *cobra.Command, args []string) error {
 
 			jsonBug := JSONBug{
 				b.Id.String(),
+				b.Id.Human(),
 				time.Unix(b.CreateUnixTime, 0),
 				time.Unix(b.EditUnixTime, 0),
 				b.Status.String(),
 				b.Labels,
 				b.Title,
-				[]map[string]string{},
-				[]map[string]string{},
-				map[string]string{},
+				[]JSONIdentity{},
+				[]JSONIdentity{},
+				JSONIdentity{},
 				b.LenComments,
 				b.CreateMetadata,
 			}
@@ -104,14 +113,16 @@ func runLsBug(_ *cobra.Command, args []string) error {
 			if b.AuthorId != "" {
 				author, err := backend.ResolveIdentityExcerpt(b.AuthorId)
 				if err != nil {
-					jsonBug.Author["Name"] = "<Author information could not be loaded>"
+					jsonBug.Author.Name = "<Author information could not be loaded>"
 				} else {
-					jsonBug.Author["Name"] = author.DisplayName()
-					jsonBug.Author["Login"] = author.Login
+					jsonBug.Author.Name = author.DisplayName()
+					jsonBug.Author.Login = author.Login
+					jsonBug.Author.Id = author.Id.String()
+					jsonBug.Author.HumanId = author.Id.Human()
 				}
 			} else {
-				jsonBug.Author["Name"] = b.LegacyAuthor.DisplayName()
-				jsonBug.Author["Login"] = b.LegacyAuthor.Login
+				jsonBug.Author.Name = b.LegacyAuthor.DisplayName()
+				jsonBug.Author.Login = b.LegacyAuthor.Login
 			}
 
 			var checkErr error = nil
@@ -121,9 +132,11 @@ func runLsBug(_ *cobra.Command, args []string) error {
 					if err != nil {
 						checkErr = err
 					} else {
-						jsonBug.Actors = append(jsonBug.Actors, map[string]string{
-							"Name":  actor.DisplayName(),
-							"Login": actor.Login,
+						jsonBug.Actors = append(jsonBug.Actors, JSONIdentity{
+							actor.Id.String(),
+							actor.Id.Human(),
+							actor.Name,
+							actor.Login,
 						})
 					}
 				} else {
@@ -132,7 +145,12 @@ func runLsBug(_ *cobra.Command, args []string) error {
 			}
 
 			if checkErr != nil {
-				jsonBug.Actors = append(jsonBug.Actors, map[string]string{"Error": "<Note: Some actors could not be found.>"})
+				jsonBug.Actors = append(jsonBug.Actors, JSONIdentity{
+					"",
+					"",
+					"Error: Some actors could not be loaded.",
+					"",
+				})
 				checkErr = nil
 			}
 
@@ -142,9 +160,11 @@ func runLsBug(_ *cobra.Command, args []string) error {
 					if err != nil {
 						checkErr = err
 					} else {
-						jsonBug.Participants = append(jsonBug.Participants, map[string]string{
-							"Name":  participant.DisplayName(),
-							"Login": participant.Login,
+						jsonBug.Participants = append(jsonBug.Participants, JSONIdentity{
+							participant.Id.String(),
+							participant.Id.Human(),
+							participant.DisplayName(),
+							participant.Login,
 						})
 					}
 				} else {
@@ -153,7 +173,12 @@ func runLsBug(_ *cobra.Command, args []string) error {
 			}
 
 			if checkErr != nil {
-				jsonBug.Participants = append(jsonBug.Participants, map[string]string{"Error": "<Note: Some participants could not be found.>"})
+				jsonBug.Participants = append(jsonBug.Participants, JSONIdentity{
+					"",
+					"",
+					"Error: Some participants could not be loaded.",
+					"",
+				})
 			}
 
 			jsonObject, _ := json.MarshalIndent(jsonBug, "", "    ")
