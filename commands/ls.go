@@ -2,7 +2,6 @@ package commands
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -26,30 +25,6 @@ var (
 	lsSortDirection string
 	lsOutputFormat  string
 )
-
-type JSONBug struct {
-	Id           string
-	HumanId      string
-	CreationTime time.Time
-	LastEdited   time.Time
-
-	Status       string
-	Labels       []bug.Label
-	Title        string
-	Actors       []JSONIdentity
-	Participants []JSONIdentity
-	Author       JSONIdentity
-
-	Comments int
-	Metadata map[string]string
-}
-
-type JSONIdentity struct {
-	Id      string
-	HumanId string
-	Name    string
-	Login   string
-}
 
 func runLsBug(_ *cobra.Command, args []string) error {
 	backend, err := cache.NewRepoCache(repo)
@@ -76,161 +51,161 @@ func runLsBug(_ *cobra.Command, args []string) error {
 
 	allIds := backend.QueryBugs(q)
 
+	bugExcerpt := make([]*cache.BugExcerpt, len(allIds))
+	for i, id := range allIds {
+		b, err := backend.ResolveBugExcerpt(id)
+		if err != nil {
+			return err
+		}
+		bugExcerpt[i] = b
+	}
+
 	switch lsOutputFormat {
-	case "plaintext", "plain":
-		for _, id := range allIds {
-			b, err := backend.ResolveBugExcerpt(id)
-			if err != nil {
-				return err
-			}
-
-			fmt.Printf("[%s] %s\n", b.Status, b.Title)
-		}
-		break
-
+	case "plain":
+		return lsPlainFormatter(backend, bugExcerpt)
 	case "json":
-		for _, id := range allIds {
-			b, err := backend.ResolveBugExcerpt(id)
-			if err != nil {
-				return err
-			}
-
-			jsonBug := JSONBug{
-				b.Id.String(),
-				b.Id.Human(),
-				time.Unix(b.CreateUnixTime, 0),
-				time.Unix(b.EditUnixTime, 0),
-				b.Status.String(),
-				b.Labels,
-				b.Title,
-				[]JSONIdentity{},
-				[]JSONIdentity{},
-				JSONIdentity{},
-				b.LenComments,
-				b.CreateMetadata,
-			}
-
-			if b.AuthorId != "" {
-				author, err := backend.ResolveIdentityExcerpt(b.AuthorId)
-				if err != nil {
-					jsonBug.Author.Name = "<Author information could not be loaded>"
-				} else {
-					jsonBug.Author.Name = author.DisplayName()
-					jsonBug.Author.Login = author.Login
-					jsonBug.Author.Id = author.Id.String()
-					jsonBug.Author.HumanId = author.Id.Human()
-				}
-			} else {
-				jsonBug.Author.Name = b.LegacyAuthor.DisplayName()
-				jsonBug.Author.Login = b.LegacyAuthor.Login
-			}
-
-			var checkErr error = nil
-			for _, element := range b.Actors {
-				if element != "" {
-					actor, err := backend.ResolveIdentityExcerpt(element)
-					if err != nil {
-						checkErr = err
-					} else {
-						jsonBug.Actors = append(jsonBug.Actors, JSONIdentity{
-							actor.Id.String(),
-							actor.Id.Human(),
-							actor.Name,
-							actor.Login,
-						})
-					}
-				} else {
-					checkErr = errors.New("Empty actor name")
-				}
-			}
-
-			if checkErr != nil {
-				jsonBug.Actors = append(jsonBug.Actors, JSONIdentity{
-					"",
-					"",
-					"Error: Some actors could not be loaded.",
-					"",
-				})
-				checkErr = nil
-			}
-
-			for _, element := range b.Participants {
-				if element != "" {
-					participant, err := backend.ResolveIdentityExcerpt(element)
-					if err != nil {
-						checkErr = err
-					} else {
-						jsonBug.Participants = append(jsonBug.Participants, JSONIdentity{
-							participant.Id.String(),
-							participant.Id.Human(),
-							participant.DisplayName(),
-							participant.Login,
-						})
-					}
-				} else {
-					checkErr = errors.New("Empty participant name")
-				}
-			}
-
-			if checkErr != nil {
-				jsonBug.Participants = append(jsonBug.Participants, JSONIdentity{
-					"",
-					"",
-					"Error: Some participants could not be loaded.",
-					"",
-				})
-			}
-
-			jsonObject, _ := json.MarshalIndent(jsonBug, "", "    ")
-			fmt.Printf("%s\n", jsonObject)
-		}
-		break
-
+		return lsJsonFormatter(backend, bugExcerpt)
+	case "default":
+		return lsDefaultFormatter(backend, bugExcerpt)
 	default:
-		for _, id := range allIds {
-			b, err := backend.ResolveBugExcerpt(id)
+		return fmt.Errorf("unknown format %s", lsOutputFormat)
+	}
+}
+
+type JSONBug struct {
+	Id           string    `json:"id"`
+	HumanId      string    `json:"human_id"`
+	CreationTime time.Time `json:"creation_time"`
+	LastEdited   time.Time `json:"last_edited"`
+
+	Status       string         `json:"status"`
+	Labels       []bug.Label    `json:"labels"`
+	Title        string         `json:"title"`
+	Actors       []JSONIdentity `json:"actors"`
+	Participants []JSONIdentity `json:"participants"`
+	Author       JSONIdentity   `json:"author"`
+
+	Comments int               `json:"comments"`
+	Metadata map[string]string `json:"metadata"`
+}
+
+type JSONIdentity struct {
+	Id      string `json:"id"`
+	HumanId string `json:"human_id"`
+	Name    string `json:"name"`
+	Login   string `json:"login"`
+}
+
+func lsJsonFormatter(backend *cache.RepoCache, bugExcerpts []*cache.BugExcerpt) error {
+	for _, b := range bugExcerpts {
+		jsonBug := JSONBug{
+			b.Id.String(),
+			b.Id.Human(),
+			time.Unix(b.CreateUnixTime, 0),
+			time.Unix(b.EditUnixTime, 0),
+			b.Status.String(),
+			b.Labels,
+			b.Title,
+			[]JSONIdentity{},
+			[]JSONIdentity{},
+			JSONIdentity{},
+			b.LenComments,
+			b.CreateMetadata,
+		}
+
+		if b.AuthorId != "" {
+			author, err := backend.ResolveIdentityExcerpt(b.AuthorId)
 			if err != nil {
 				return err
 			}
 
-			var name string
-			if b.AuthorId != "" {
-				author, err := backend.ResolveIdentityExcerpt(b.AuthorId)
-				if err != nil {
-					name = "<missing author data>"
-				} else {
-					name = author.DisplayName()
-				}
-			} else {
-				name = b.LegacyAuthor.DisplayName()
-			}
-
-			var labelsTxt strings.Builder
-			for _, l := range b.Labels {
-				lc256 := l.Color().Term256()
-				labelsTxt.WriteString(lc256.Escape())
-				labelsTxt.WriteString(" ◼")
-				labelsTxt.WriteString(lc256.Unescape())
-			}
-
-			// truncate + pad if needed
-			labelsFmt := text.TruncateMax(labelsTxt.String(), 10)
-			titleFmt := text.LeftPadMaxLine(b.Title, 50-text.Len(labelsFmt), 0)
-			authorFmt := text.LeftPadMaxLine(name, 15, 0)
-
-			comments := fmt.Sprintf("%4d 💬", b.LenComments)
-			if b.LenComments > 9999 {
-				comments = "    ∞ 💬"
-			}
-
-			fmt.Printf("%s %s\t%s\t%s\t%s\n",
-				colors.Cyan(b.Id.Human()),
-				colors.Yellow(b.Status),
-				titleFmt+labelsFmt,
-				colors.Magenta(authorFmt),
-				comments,
-			)
+			jsonBug.Author.Name = author.DisplayName()
+			jsonBug.Author.Login = author.Login
+			jsonBug.Author.Id = author.Id.String()
+			jsonBug.Author.HumanId = author.Id.Human()
+		} else {
+			jsonBug.Author.Name = b.LegacyAuthor.DisplayName()
+			jsonBug.Author.Login = b.LegacyAuthor.Login
 		}
+
+		for _, element := range b.Actors {
+			actor, err := backend.ResolveIdentityExcerpt(element)
+			if err != nil {
+				return err
+			}
+
+			jsonBug.Actors = append(jsonBug.Actors, JSONIdentity{
+				actor.Id.String(),
+				actor.Id.Human(),
+				actor.Name,
+				actor.Login,
+			})
+		}
+
+		for _, element := range b.Participants {
+			participant, err := backend.ResolveIdentityExcerpt(element)
+			if err != nil {
+				return err
+			}
+			jsonBug.Participants = append(jsonBug.Participants, JSONIdentity{
+				participant.Id.String(),
+				participant.Id.Human(),
+				participant.DisplayName(),
+				participant.Login,
+			})
+		}
+
+		jsonObject, _ := json.MarshalIndent(jsonBug, "", "    ")
+		fmt.Printf("%s\n", jsonObject)
+	}
+	return nil
+}
+
+func lsDefaultFormatter(backend *cache.RepoCache, bugExcerpts []*cache.BugExcerpt) error {
+	for _, b := range bugExcerpts {
+		var name string
+		if b.AuthorId != "" {
+			author, err := backend.ResolveIdentityExcerpt(b.AuthorId)
+			if err != nil {
+				return err
+			}
+			name = author.DisplayName()
+		} else {
+			name = b.LegacyAuthor.DisplayName()
+		}
+
+		var labelsTxt strings.Builder
+		for _, l := range b.Labels {
+			lc256 := l.Color().Term256()
+			labelsTxt.WriteString(lc256.Escape())
+			labelsTxt.WriteString(" ◼")
+			labelsTxt.WriteString(lc256.Unescape())
+		}
+
+		// truncate + pad if needed
+		labelsFmt := text.TruncateMax(labelsTxt.String(), 10)
+		titleFmt := text.LeftPadMaxLine(b.Title, 50-text.Len(labelsFmt), 0)
+		authorFmt := text.LeftPadMaxLine(name, 15, 0)
+
+		comments := fmt.Sprintf("%4d 💬", b.LenComments)
+		if b.LenComments > 9999 {
+			comments = "    ∞ 💬"
+		}
+
+		fmt.Printf("%s %s\t%s\t%s\t%s\n",
+			colors.Cyan(b.Id.Human()),
+			colors.Yellow(b.Status),
+			titleFmt+labelsFmt,
+			colors.Magenta(authorFmt),
+			comments,
+		)
+	}
+	return nil
+}
+
+func lsPlainFormatter(backend *cache.RepoCache, bugExcerpts []*cache.BugExcerpt) error {
+	for _, b := range bugExcerpts {
+		fmt.Printf("[%s] %s\n", b.Status, b.Title)
 	}
 	return nil
 }
